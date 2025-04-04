@@ -1,0 +1,174 @@
+import sys
+from collections import deque
+import heapq
+
+def parse_file(filename):
+    with open(filename, 'r') as file:
+        lines = [line.strip() for line in file.readlines()]
+        start_state = lines[0]
+        legal_states = expand_states(lines[1].split(',')) if len(lines) > 1 and lines[1] else []
+        unsafe_states = expand_states(lines[2].split(',')) if len(lines) > 2 and lines[2] else []
+        return start_state, set(legal_states), set(unsafe_states)
+
+def expand_states(states):
+    result = []
+    for st in states:
+        if 'X' in st:
+            i = st.index('X')
+            result += expand_states([st[:i] + '0' + st[i+1:], st[:i] + '1' + st[i+1:]])
+        else:
+            result.append(st)
+    return result
+
+def generate_children(s):
+    return [s[:i] + ('1' if s[i] == '0' else '0') + s[i+1:] for i in range(len(s))]
+
+def hamming_distance(s, goals):
+    return min(sum(a != b for a, b in zip(s, g)) for g in goals)
+
+def depth_limited_search(state, goals, unsafe, limit, expansions):
+    stack = [(state, [state])]
+    visited = set()
+    local_expanded = []
+
+    while stack and expansions[0] < 1000:
+        current, path = stack.pop()
+        if current in visited or current in unsafe:
+            continue
+        visited.add(current)
+        local_expanded.append(current)
+        expansions[0] += 1
+        if current in goals:
+            return path, local_expanded, True
+        if len(path) - 1 < limit:
+            for c in reversed(generate_children(current)):
+                if c not in visited and c not in unsafe:
+                    stack.append((c, path + [c]))
+    return [], local_expanded, False
+
+def hill_climbing(start, goals, unsafe):
+    expanded_order = []
+    visited = set()
+    current = start
+    path = [start]
+    expansions = 0
+
+    while expansions < 1000:
+        if current in visited:
+            return [], expanded_order
+        visited.add(current)
+        expanded_order.append(current)
+        expansions += 1
+        if current in goals:
+            return path, expanded_order
+
+        curr_h = hamming_distance(current, goals)
+        children = generate_children(current)
+        best_child, best_h = None, curr_h
+
+        for c in children:
+            if c not in unsafe and c not in visited:
+                ch = hamming_distance(c, goals)
+                if ch < best_h:
+                    best_child, best_h = c, ch
+
+        if not best_child:
+            return [], expanded_order
+
+        current = best_child
+        path.append(current)
+
+    return [], expanded_order
+
+def greedy_astar_search(char, start, goals, unsafe, limit):
+    visited = set()
+    pq = []
+    counter = 0
+    hval = hamming_distance(start, goals)
+
+    heapq.heappush(pq, ((hval if char == 'G' else hval), counter, start, [start]))
+    counter += 1
+    expanded_order = []
+
+    while pq and len(expanded_order) < limit:
+        _, _, s, p = heapq.heappop(pq)
+        if s in visited or s in unsafe:
+            continue
+        visited.add(s)
+        expanded_order.append(s)
+        if s in goals:
+            return ','.join(p), ','.join(expanded_order)
+        for c in generate_children(s):
+            if c not in visited and c not in unsafe:
+                new_path = p + [c]
+                val = (len(new_path) - 1 + hamming_distance(c, goals)) if char == 'A' else hamming_distance(c, goals)
+                heapq.heappush(pq, (val, counter, c, new_path))
+                counter += 1
+
+    return "SEARCH FAILED", ','.join(expanded_order)
+
+def search(char, start, goals, unsafe, limit=1000):
+    expanded_order = []
+
+    if char == 'B':  # BFS
+        queue = deque([(start, [start])])
+        visited = set()
+        while queue and len(expanded_order) < limit:
+            s, p = queue.popleft()
+            if s in visited or s in unsafe:
+                continue
+            visited.add(s)
+            expanded_order.append(s)
+            if s in goals:
+                return ','.join(p), ','.join(expanded_order)
+            for c in generate_children(s):
+                if c not in visited and c not in unsafe:
+                    queue.append((c, p + [c]))
+        return "SEARCH FAILED", ','.join(expanded_order)
+
+    elif char == 'D':  # DFS
+        stack = [(start, [start])]
+        visited = set()
+        while stack and len(expanded_order) < limit:
+            s, p = stack.pop()
+            if s in visited or s in unsafe:
+                continue
+            visited.add(s)
+            expanded_order.append(s)
+            if s in goals:
+                return ','.join(p), ','.join(expanded_order)
+            for c in reversed(generate_children(s)):
+                if c not in visited and c not in unsafe:
+                    stack.append((c, p + [c]))
+        return "SEARCH FAILED", ','.join(expanded_order)
+
+    elif char == 'I':  # IDS
+        expansions = [0]
+        for d in range(limit + 1):
+            p, local_expanded, found = depth_limited_search(start, goals, unsafe, d, expansions)
+            expanded_order += local_expanded
+            if found:
+                return ','.join(p), ','.join(expanded_order)
+            if expansions[0] >= limit:
+                break
+        return "SEARCH FAILED", ','.join(expanded_order)
+
+    elif char == 'H':  # Hill-Climbing
+        p, exp = hill_climbing(start, goals, unsafe)
+        return (','.join(p), ','.join(exp)) if p and p[-1] in goals else ("SEARCH FAILED", ','.join(exp))
+
+    elif char in ('G', 'A'):  # Greedy / A*
+        return greedy_astar_search(char, start, goals, unsafe, limit)
+
+    return "SEARCH FAILED", ""
+
+def broken_printer(char, filename):
+    start, legal, unsafe = parse_file(filename)
+    return search(char, start, legal, unsafe)
+
+if __name__ == '__main__':
+    char = sys.argv[1] if len(sys.argv) > 2 else 'B'
+    filename = sys.argv[2] if len(sys.argv) > 2 else 'example1.txt'
+    path, expanded = broken_printer(char, filename)
+    print(path)
+    print(expanded)
